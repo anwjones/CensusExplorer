@@ -1,0 +1,256 @@
+---
+title: "Census Explorer"
+author: "Alan Whitelock-Jones"
+date: "22 August 2015"
+output: 
+  html_document: 
+    highlight: tango
+---
+
+#Australian Mortality in 2011
+
+This Shiny project presents the Australian 2011 Mortality by Census District linked to the demographic information collected in the 2011 Australian Census.  All the data used is based on the [Australian Bureau of Statistics](http://www.abs.gov.au/) published data and is available free of charge from their website.  You do however need to create an account to download it.
+
+The particular data is the Basic Community Profile at SA2 level, combined with the Deaths data by SA2 for the 2011 year.
+
+SA1 is the finest level of data with around 200 people in each SA1.  Each SA2 is an aggregation of SA1s but is still reasonably small and homogenous. 
+
+
+###How does the application work ?
+
+The shiny application ([Project1](https://anwjones.shinyapps.io/Project1)) allows you to explore `Actual Deaths/Expected Deaths` for all the SA2 in Australia.  The underlying data contains the actual deaths and Expected deaths as well as some information derived from the Basic COmmunity Profile.  Some of this information is there just for fun, but other fields are really useful.  You can use the pull down boxes to choose variables and look at the resultant graphs.
+
+###Longitude v Latitude
+Plotting each SA by its (centroid) Longitude and Latitude produces a ghostly image of Australia.
+
+```{r Long_Lat, echo = FALSE}
+library(ggplot2)
+library(scales)
+library(data.table)
+library(shiny)
+
+SA2 <- data.table(read.csv(file='C:/Coursera/Data_Applications/Project1/SA2_DATA.csv'))
+
+var.names <- read.csv('C:/Coursera/Data_Applications/Project1/VAR_NAMES.csv'
+                      ,strip.white=TRUE, stringsAsFactors = FALSE)
+
+#function to create the data.frame we want to plot
+createPlotData <- function(X, Y){
+    X.NAME <- var.names[var.names$DISPLAY==X,'NAME']
+    Y.NAME <- var.names[var.names$DISPLAY==Y,'NAME']
+    df <- SA2[,c('DEATHS','EXPDEATHS',X.NAME, Y.NAME), with=FALSE]
+    setnames(df, 3, 'X') 
+    setnames(df, 4, 'Y')
+    
+    if (!is.na(var.names[var.names$DISPLAY==X,'LO'])){
+        df$X.group <- cut(df$X, quantile(df$X, probs=seq(0,1,0.1),na.rm=TRUE)
+              ,labels=c('01','02','03','04','05','06','07','08','09','10'))
+    } else {
+        df$X.group <- df$X
+    }    
+
+    if (!is.na(var.names[var.names$DISPLAY==Y,'LO'])){
+        df$Y.group <- cut(df$Y, quantile(df$Y, probs=seq(0,1,0.1),na.rm=TRUE)
+                          ,labels=c('01','02','03','04','05','06','07','08','09','10'))
+    } else {
+        df$Y.group <- df$Y
+    }
+    df
+}
+
+#function to create a scatter plot
+createScatter <- function(input){
+      scatter <- ggplot(data=df, aes(x=X, y=Y, colour=DEATHS/EXPDEATHS)) +
+          geom_point() + 
+          scale_color_gradient2(low='darkgreen', mid='grey', space='Lab'
+                                ,high='darkred', midpoint=1
+                                ,limits=c(0,2), na.value='grey') +
+          labs(x=input$X.Axis, y=input$Y.Axis)
+
+      X.VARTYPE <- var.names[var.names$DISPLAY==input$X.Axis,'VARTYPE']
+      Y.VARTYPE <- var.names[var.names$DISPLAY==input$Y.Axis,'VARTYPE']
+      X.LO <- var.names[var.names$DISPLAY==input$X.Axis,'LO']
+      Y.LO <- var.names[var.names$DISPLAY==input$Y.Axis,'LO']
+      X.HI <- var.names[var.names$DISPLAY==input$X.Axis,'HI']
+      Y.HI <- var.names[var.names$DISPLAY==input$Y.Axis,'HI']
+      
+      
+      if (!is.na(X.LO)){
+           scatter <- scatter + scale_x_continuous(limits=c(X.LO,X.HI))   
+      } else {
+          scatter <- scatter + scale_x_discrete()   
+      }
+      
+      if (!is.na(Y.LO)){
+          scatter <- scatter + scale_y_continuous(limits=c(Y.LO,Y.HI))   
+      } else {
+          scatter <- scatter + scale_y_discrete()   
+      }
+      
+     scatter
+}
+
+input <- list(X.Axis='Longitude', Y.Axis='Latitude')
+df <- createPlotData(input$X.Axis, input$Y.Axis)
+gg <- createScatter(input)
+suppressWarnings(print(gg))
+ 
+```
+
+###Factors Affecting Mortality 
+
+Looking at the group plot of `Median Household weekly income` against `Prop completed  high school`
+is revealing:
+
+```{r Income_highschool, echo=FALSE}
+#function to create a grouped plot
+createGrouped <- function(input){
+    groupplot <- ggplot(data=df.1, aes(x=X.group, y=Y.group, colour=A/E, size=E)) +
+            geom_point(shape=15) +
+            scale_size_continuous(range=c(0,20), guide='none') +
+            scale_colour_gradient2(low='green', mid='grey', space='Lab'
+                                   ,high='red', midpoint=1
+                                   ,limits=c(0.8,1.2), na.value='grey') +
+            labs(x=paste0(input$X.Axis, ' grouped'), y= paste0(input$Y.Axis, ' grouped'))
+        
+    groupplot
+}
+
+input <- list(X.Axis='Median Household weekly income', Y.Axis='Prop completed high school')
+df <- createPlotData(input$X.Axis, input$Y.Axis)
+df.1 <- df[complete.cases(df)
+             ,list(A=sum(DEATHS, na.rm=TRUE), E=sum(EXPDEATHS, na.rm=TRUE))
+             ,by=list(X.group, Y.group)]
+
+gg <- createGrouped(input)
+suppressWarnings(print(gg))
+```
+
+The size of each block is linked to the expected deaths (roughly equivalent to the population) and the grouping is into decile bands for each axis. So, the data lying along the bottom-left to top-right diagonal means increasing income is linked to completing high school, with districts with high high-scool completion have higher average incomes.
+
+The colour of each block varies from red for above-average mortality to green for below-average mortality.  The colour becoming more green moving from left to right means higher incomes have better mortality even after taking into account levels of education.  The blocks getting greener from bottom to top means higher education levels have better mortality even at the same levels of income.
+
+These characteristics are visible even after the grouping of many households together.  From the scatter plot (which has the original scale not deciles, the areas with high highschool completion rates are around 60%, the low ones around 30%, so having 30% more people having completed high school results in a 25% improvement in mortality for the district as whole.
+
+This graph may be a counterintuitive: `Prop born in Australia` vs `Prop of dwellings owned outright`. 
+
+```{r Ausborn_outright, echo=FALSE}
+input <- list(X.Axis='Prop born in Australia', Y.Axis='Prop of dwellings owned ouright')
+df <- createPlotData(input$X.Axis, input$Y.Axis)
+df.1 <- df[complete.cases(df)
+             ,list(A=sum(DEATHS, na.rm=TRUE), E=sum(EXPDEATHS, na.rm=TRUE))
+             ,by=list(X.group, Y.group)]
+
+gg <- createGrouped(input)
+suppressWarnings(print(gg))
+
+```
+
+The green numbers on the left hand side imply that overseas born residents have better mortality that Australian born.  This can be explained by areas with high Australian born tending to be rural and even remote, whereas overseas born have high numbers of skilled immigrants with a high education.
+
+##Details of the server calculation
+
+The code below is the details of the server.R function behind the application:
+
+```{r server.R, echo=TRUE, eval=FALSE}
+library (ggplot2)
+library(scales)
+library(data.table)
+library(shiny)
+
+SA2 <- data.table(read.csv(file='SA2_DATA.csv'))
+
+var.names <- read.csv('VAR_NAMES.csv', strip.white=TRUE, stringsAsFactors = FALSE)
+
+#function to create the data.frame we want to plot
+createPlotData <- function(X, Y){
+    X.NAME <- var.names[var.names$DISPLAY==X,'NAME']
+    Y.NAME <- var.names[var.names$DISPLAY==Y,'NAME']
+    df <- SA2[,c('DEATHS','EXPDEATHS',X.NAME, Y.NAME), with=FALSE]
+    setnames(df, 3, 'X') 
+    setnames(df, 4, 'Y')
+    
+    if (!is.na(var.names[var.names$DISPLAY==X,'LO'])){
+        df$X.group <- cut(df$X, quantile(df$X, probs=seq(0,1,0.1),na.rm=TRUE)
+              ,labels=c('01','02','03','04','05','06','07','08','09','10'))
+    } else {
+        df$X.group <- df$X
+    }    
+
+    if (!is.na(var.names[var.names$DISPLAY==Y,'LO'])){
+        df$Y.group <- cut(df$Y, quantile(df$Y, probs=seq(0,1,0.1),na.rm=TRUE)
+                          ,labels=c('01','02','03','04','05','06','07','08','09','10'))
+    } else {
+        df$Y.group <- df$Y
+    }
+    df
+}
+
+
+shinyServer(function(input, output) {
+
+    #create a data.table with the plotted variables
+    df <- reactive({
+        createPlotData(input$X.Axis, input$Y.Axis)    
+        })
+    
+    #create a summarised data.table by the grouped variables
+    df.1 <- reactive({ 
+        df()[complete.cases(df())
+             ,list(A=sum(DEATHS, na.rm=TRUE), E=sum(EXPDEATHS, na.rm=TRUE))
+             ,by=list(X.group, Y.group)]
+    })
+    
+    #create the scatter plot
+    output$scatter <- renderPlot({
+
+      scatter <- ggplot(data=df(), aes(x=X, y=Y, colour=DEATHS/EXPDEATHS)) +
+          geom_point() + 
+          scale_color_gradient2(low='darkgreen', mid='grey', space='Lab'
+                                ,high='darkred', midpoint=1
+                                ,limits=c(0,2), na.value='grey') +
+          labs(x=input$X.Axis, y=input$Y.Axis)
+
+      X.VARTYPE <- var.names[var.names$DISPLAY==input$X.Axis,'VARTYPE']
+      Y.VARTYPE <- var.names[var.names$DISPLAY==input$Y.Axis,'VARTYPE']
+      X.LO <- var.names[var.names$DISPLAY==input$X.Axis,'LO']
+      Y.LO <- var.names[var.names$DISPLAY==input$Y.Axis,'LO']
+      X.HI <- var.names[var.names$DISPLAY==input$X.Axis,'HI']
+      Y.HI <- var.names[var.names$DISPLAY==input$Y.Axis,'HI']
+      
+      
+      if (!is.na(X.LO)){
+           scatter <- scatter + scale_x_continuous(limits=c(X.LO,X.HI))   
+      } else {
+          scatter <- scatter + scale_x_discrete()   
+      }
+      
+      if (!is.na(Y.LO)){
+          scatter <- scatter + scale_y_continuous(limits=c(Y.LO,Y.HI))   
+      } else {
+          scatter <- scatter + scale_y_discrete()   
+      }
+      
+     scatter
+     
+    })
+    
+    #create the grouped plot
+    output$group <- renderPlot({
+     
+        grouped <- ggplot(data=df.1(), aes(x=X.group, y=Y.group, colour=A/E, size=E)) +
+            geom_point(shape=15) +
+            scale_size_continuous(range=c(0,20), guide='none') +
+            scale_colour_gradient2(low='green', mid='grey', space='Lab'
+                                   ,high='red', midpoint=1
+                                   ,limits=c(0.8,1.2), na.value='grey') +
+            labs(x=paste0(input$X.Axis, ' grouped'), y= paste0(input$Y.Axis, ' grouped'))
+        
+        grouped
+     
+    })
+
+})
+
+
+```
